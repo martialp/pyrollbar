@@ -84,6 +84,7 @@ def passthrough_decorator(func):
         return func(*args, **kwargs)
     return wrap
 
+
 try:
     from tornado.gen import coroutine as tornado_coroutine
     from tornado.httpclient import AsyncHTTPClient as TornadoAsyncHTTPClient
@@ -95,7 +96,7 @@ try:
     import treq
     from twisted.python import log as twisted_log
 
-    def log_handler(event):
+    def twisted_log_observer(event):
         """
         Default uncaught error handler
         """
@@ -112,11 +113,6 @@ try:
                 report_exc_info((err.type, err.value, err.getTracebackObject()))
         except:
             log.exception('Error while reporting to Rollbar')
-
-    # Add Rollbar as a log handler which will report uncaught errors
-    twisted_log.addObserver(log_handler)
-
-
 except ImportError:
     treq = None
 
@@ -290,8 +286,12 @@ def init(access_token, environment='production', **kw):
     if SETTINGS.get('allow_logging_basic_config'):
         logging.basicConfig()
 
-    if SETTINGS.get('handler') == 'agent':
+    handler = SETTINGS.get('handler')
+    if handler == 'agent':
         agent_log = _create_agent_log()
+    elif handler == 'twisted' and treq:
+        # Add Rollbar as a Twisted Observer which will report uncaught errors
+        twisted_log.addObserver(twisted_log_observer)
 
     # We will perform these transforms in order:
     # 1. Serialize the payload to be all python built-in objects
@@ -402,7 +402,7 @@ def send_payload(payload, access_token):
         _send_payload_appengine(payload, access_token)
     elif handler == 'twisted':
         if treq is None:
-            log.error('Unable to find Treq')
+            log.error('treq and twisted are required for the twisted handler')
             return
         _send_payload_twisted(payload, access_token)
     else:
@@ -1067,7 +1067,7 @@ def _build_server_data():
     # argv does not always exist in embedded python environments
     argv = getattr(sys, 'argv', None)
     if argv:
-         server_data['argv'] = argv
+        server_data['argv'] = argv
 
     for key in ['branch', 'root']:
         if SETTINGS.get(key):
